@@ -1,23 +1,30 @@
 ---
 title: "Supplementary material for Modeling safety-critical events using trucking naturalistic driving data: A driver-centric hierarchical framework for data analysis"
 author:
-  - name: "Miao Cai ^[Email: miao.cai@slu.edu | Website: <a href=\"https://scholar.google.com/citations?user=kjFCzEkAAAAJ&hl=en\">Google Scholar</a>]"
-    affiliation: College for Public Health and Social Justice, Saint Louis University
-  - name: "Qiong Hu ^[Email: qzh0011@auburn.edu | Website: <a href=\"https://www.linkedin.com/in/qiong-hu\">LinkedIn Site</a>]"
-    affiliation: Department of Industrial and Systems Engineering, Auburn University
-  - name: "Amir Mehdizadeh ^[Email: azm0127@auburn.edu | Website: <a href=\"https://scholar.google.com/citations?user=w0sF97YAAAAJ&hl=en\">Google Scholar</a>]"
-    affiliation: Department of Industrial and Systems Engineering, Auburn University
-  - name: "Alex Vinel ^[Email: azv0019@auburn.edu | Phone: +1-334-844-1425 | Website: <a href=\"http://eng.auburn.edu/directory/azv0019\">Auburn University Official</a>]"
-    affiliation: Department of Industrial and Systems Engineering, Auburn University
-  - name: "Steve Rigdon ^[Email: steve.rigdon@slu.edu | Phone: +1-314-977-8127 | Website: <a href=\"https://www.slu.edu/public-health-social-justice/faculty/rigdon-steven.php\">Saint Louis University Official</a>]"
-    affiliation: College for Public Health and Social Justice, Saint Louis University
+  - name: "Miao Cai ^[Email: miao.cai@outlook.com | Website: <a href=\"https://scholar.google.com/citations?user=kjFCzEkAAAAJ&hl=en\">Google Scholar</a>]"
+    affiliation: Department of Epidemiology, School of Public Health, Sun Yat-sen University
+  
   - name: "Mohammad Ali Alamdar Yazdi ^[Email: yazdi@miamioh.edu | Phone: +1-410-234-4522 | Website: <a href=\"https://carey.jhu.edu/faculty/faculty-directory/mohammad-ali-alamdar-yazdi-phd\">Johns Hopkins University Official</a>]"
     affiliation: Johns Hopkins Carey School Business, Johns Hopkins University
+  
+  - name: "Qiong Hu ^[Email: qzh0011@auburn.edu | Website: <a href=\"https://www.linkedin.com/in/qiong-hu\">LinkedIn Site</a>]"
+    affiliation: Department of Industrial and Systems Engineering, Auburn University
+  
+  - name: "Amir Mehdizadeh ^[Email: azm0127@auburn.edu | Website: <a href=\"https://scholar.google.com/citations?user=w0sF97YAAAAJ&hl=en\">Google Scholar</a>]"
+    affiliation: Department of Industrial and Systems Engineering, Auburn University
+  
+  - name: "Alex Vinel ^[Email: azv0019@auburn.edu | Phone: +1-334-844-1425 | Website: <a href=\"http://eng.auburn.edu/directory/azv0019\">Auburn University Official</a>]"
+    affiliation: Department of Industrial and Systems Engineering, Auburn University
+
   - name: "Karen Davis ^[Email: davisk4@miamioh.edu | Phone: +1-513-529-0354 | Website: <a href=\"https://miamioh.edu/cec/academics/departments/cse/about/faculty-and-staff/davis-karen/\">Miami University Official</a>]"
     affiliation: Department of Computer Science and Software Engineering, Miami University
+    
   - name: "Fadel M. Megahed ^[Email: fmegahed@miamioh.edu | Phone: +1-513-529-4185 | Website: <a href=\"https://miamioh.edu/fsb/directory/?up=/directory/megahefm\">Miami University Official</a>]"
     affiliation: Farmer School of Business, Miami University
-date: "`r format(Sys.time(), '%B %d, %Y')`"
+    
+  - name: "Steven E. Rigdon ^[Email: steve.rigdon@slu.edu | Phone: +1-314-977-8127 | Website: <a href=\"https://www.slu.edu/public-health-social-justice/faculty/rigdon-steven.php\">Saint Louis University Official</a>]"
+    affiliation: College for Public Health and Social Justice, Saint Louis University
+date: "`r Sys.setlocale('LC_TIME', 'C');format(Sys.time(), '%B %d, %Y')`"
 output: 
   html_document:
     toc: TRUE
@@ -34,22 +41,38 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+```{r}
+pacman::p_load(DT, dplyr, data.table, lubridate)
+```
+
+
 Data Description
 ================
 
 Ping
 ----
 
+```{r}
+(ping = fread('Data/ping.csv'))
+```
+
+
 SCEs
 ----
+
+
 
 Weather
 -------
 
+```{r}
+(weather = fread('Data/weather.csv'))
+```
 
 
-Data Processing
-===============
+Data aggregation
+================
 ![Aggregating ping into shifts, trips, and 30-minute intervals](Figures/ping_data_aggregation.svg)
 
 Shift
@@ -63,3 +86,26 @@ Trip
 
 30-minute intervals
 -------------------
+
+
+Data merging
+===============
+
+
+
+Statistical modeling
+====================
+
+
+
+Model comparison
+================
+
+
+
+Session info
+================
+```{r}
+sessionInfo()
+```
+
