@@ -47,6 +47,8 @@ pacman::p_load(DT, dplyr, data.table, lubridate)
 ```
 
 
+All the data sets present here are simulated for the purpose of demonstration and example. They do not reflect the true demographics, driving patterns, or the unsafe driving events.
+
 Data Description
 ================
 
@@ -61,6 +63,9 @@ Ping
 SCEs
 ----
 
+```{r}
+(sce = fread('Data/ping.csv'))
+```
 
 
 Weather
