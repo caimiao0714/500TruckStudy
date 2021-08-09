@@ -10,7 +10,7 @@
 
 
 
-<meta name="date" content="2021-08-06" />
+<meta name="date" content="2021-08-09" />
 
 <title>Supplementary material for Modeling safety-critical events using trucking naturalistic driving data: A driver-centric hierarchical framework for data analysis</title>
 
@@ -271,102 +271,31 @@ College for Public Health and Social Justice, Saint Louis University<br><h4 clas
 <address class="author_afil">
 Farmer School of Business, Miami University<br><h4 class="author">Steven E. Rigdon <a href="#fn9" class="footnote-ref" id="fnref9"><sup>9</sup></a></h4>
 <address class="author_afil">
-College for Public Health and Social Justice, Saint Louis University<br><h4 class="date">August 06, 2021</h4>
+College for Public Health and Social Justice, Saint Louis University<br><h4 class="date">August 09, 2021</h4>
 
 </div>
 
 
 <p>Due to our contract with our industrial partner about data security, we cannot share any of our original data. Therefore, all the data sets present here are simulated for demonstration purposes. They do not reflect the true demographics, driving patterns, or the unsafe driving events.</p>
 <p>First, we need to load some necessary libraries.</p>
-<pre class="r"><code>pacman::p_load(DT, dplyr, data.table, lubridate)</code></pre>
+<pre class="r"><code>pacman::p_load(DT, dplyr, data.table, lubridate, lme4, broom.mixed)</code></pre>
 <div id="data-description" class="section level1" number="1">
 <h1><span class="header-section-number">1</span> Data Description</h1>
 <div id="ping" class="section level2" number="1.1">
 <h2><span class="header-section-number">1.1</span> Ping</h2>
 <pre class="r"><code>(ping = fread(&#39;Data/ping.csv&#39;))</code></pre>
-<pre><code>##         driver_id           date_time speed latitude longitude
-##      1:       d14 2015-06-01 14:38:42   1.1    33.82    -84.17
-##      2:       d14 2015-06-01 14:42:51   0.0    33.82    -84.17
-##      3:       d14 2015-06-01 14:45:23   0.0    33.82    -84.17
-##      4:       d14 2015-06-01 14:47:40   0.0    33.82    -84.17
-##      5:       d14 2015-06-01 14:50:50   1.7    33.82    -84.17
-##     ---                                                       
-## 171128:       d13 2015-06-05 07:05:51  59.5    36.98   -120.08
-## 171129:       d13 2015-06-05 07:20:09  59.1    36.83   -119.91
-## 171130:       d13 2015-06-05 07:20:00  60.6    36.83   -119.91
-## 171131:       d13 2015-06-05 07:34:54  61.6    36.67   -119.73
-## 171132:       d13 2015-06-05 07:35:19  60.1    36.66   -119.73</code></pre>
 </div>
 <div id="sces" class="section level2" number="1.2">
 <h2><span class="header-section-number">1.2</span> SCEs</h2>
 <pre class="r"><code>(sce = fread(&#39;Data/ping.csv&#39;))</code></pre>
-<pre><code>##         driver_id           date_time speed latitude longitude
-##      1:       d14 2015-06-01 14:38:42   1.1    33.82    -84.17
-##      2:       d14 2015-06-01 14:42:51   0.0    33.82    -84.17
-##      3:       d14 2015-06-01 14:45:23   0.0    33.82    -84.17
-##      4:       d14 2015-06-01 14:47:40   0.0    33.82    -84.17
-##      5:       d14 2015-06-01 14:50:50   1.7    33.82    -84.17
-##     ---                                                       
-## 171128:       d13 2015-06-05 07:05:51  59.5    36.98   -120.08
-## 171129:       d13 2015-06-05 07:20:09  59.1    36.83   -119.91
-## 171130:       d13 2015-06-05 07:20:00  60.6    36.83   -119.91
-## 171131:       d13 2015-06-05 07:34:54  61.6    36.67   -119.73
-## 171132:       d13 2015-06-05 07:35:19  60.1    36.66   -119.73</code></pre>
 </div>
 <div id="weather" class="section level2" number="1.3">
 <h2><span class="header-section-number">1.3</span> Weather</h2>
 <pre class="r"><code>(weather = fread(&#39;Data/weather.csv&#39;))</code></pre>
-<pre><code>##                  date_time latitude longitude precipitation_intensity
-##     1: 2015-08-29 15:00:00    27.60    -99.51               0.1336567
-##     2: 2015-08-31 09:00:00    27.61    -99.52               0.1336567
-##     3: 2015-04-09 13:00:00    27.61    -99.51               0.1336567
-##     4: 2015-04-09 14:00:00    27.61    -99.51               0.1336567
-##     5: 2015-04-09 15:00:00    27.61    -99.51               0.1336567
-##    ---                                                               
-## 75371: 2016-01-27 01:00:00    44.97    -93.15               0.1336567
-## 75372: 2016-01-27 12:00:00    44.97    -93.14               0.1336567
-## 75373: 2016-02-05 09:00:00    44.97    -93.14               0.1336567
-## 75374: 2016-03-04 11:00:00    44.97    -93.14               0.1336567
-## 75375: 2016-01-29 18:00:00    44.97    -93.12               0.1336567
-##        precipitation_probability wind_speed visibility
-##     1:                 0.2566047  1.2407491 0.29723329
-##     2:                 0.2566047  2.1970725 0.29723329
-##     3:                 0.2566047  0.8289598 0.29723329
-##     4:                 0.2566047  0.5756836 0.04553749
-##     5:                 0.2566047  0.8619348 0.29723329
-##    ---                                                
-## 75371:                 0.2566047  1.5368704 0.14283204
-## 75372:                 0.2566047  1.5368704 0.14283204
-## 75373:                 0.2566047  1.5368704 0.14283204
-## 75374:                 0.2566047  1.5368704 0.14283204
-## 75375:                 0.2566047  1.5368704 0.14283204</code></pre>
 </div>
 <div id="driver-demographics" class="section level2" number="1.4">
 <h2><span class="header-section-number">1.4</span> Driver demographics</h2>
 <pre class="r"><code>(demographics = fread(&#39;Data/demographics.csv&#39;))</code></pre>
-<pre><code>##     driver_id age  race gender
-##  1:        d1  40 White   Male
-##  2:       d10  39 Other   Male
-##  3:       d11  32 Black   Male
-##  4:       d12  40 White   Male
-##  5:       d13  34 White   Male
-##  6:       d14  30 Black   Male
-##  7:       d15  54 Black Female
-##  8:       d16  32 White   Male
-##  9:       d17  60 White   Male
-## 10:       d18  46 White   Male
-## 11:       d19  47 Black   Male
-## 12:        d2  45 White   Male
-## 13:       d20  35 White Female
-## 14:       d21  36 Other   Male
-## 15:        d3  40 White   Male
-## 16:        d4  73 Black   Male
-## 17:        d5  23 Black   Male
-## 18:        d6  45 Black   Male
-## 19:        d7  47 Other   Male
-## 20:        d8  30 Black   Male
-## 21:        d9  25 Black   Male
-##     driver_id age  race gender</code></pre>
 </div>
 </div>
 <div id="data-aggregation" class="section level1" number="2">
@@ -377,12 +306,157 @@ College for Public Health and Social Justice, Saint Louis University<br><h4 clas
 </div>
 <div id="shift" class="section level2" number="2.1">
 <h2><span class="header-section-number">2.1</span> Shift</h2>
+<pre class="r"><code>threshold_shift = 8*60
+
+s1 = ping %&gt;% 
+  .[!is.na(date_time)] %&gt;% 
+  setkey(driver_id, date_time) %&gt;% 
+  .[,diff := as.integer(difftime(date_time, 
+                shift(date_time, type = &quot;lag&quot;,
+                      fill = 0), units = &quot;mins&quot;)), driver_id] %&gt;%
+  .[,diff := {diff[1] = 0L; diff}, driver_id] %&gt;% 
+  .[diff &gt;= threshold_shift|speed &lt;= 10, speed := 0] %&gt;% 
+  .[,rleid := rleid(speed != 0), driver_id] %&gt;%
+  .[,`:=`(speed1 = speed)] %&gt;%
+  .[,`:=`(sum_speed = sum(speed), sum_time = sum(diff)), .(driver_id, rleid)] %&gt;%
+  .[sum_speed == 0 &amp; sum_time &lt; threshold_shift, speed1 := 3] %&gt;% 
+  .[,`:=`(sum_speed = sum(speed1)), .(driver_id, rleid)] %&gt;%
+  .[,shift_id := fifelse(sum_speed == 0, 0, rleid(speed1 != 0)), driver_id] %&gt;% 
+  .[,`:=`(rev_cums_sp = rev(cumsum(rev(speed))),
+          cums_sp = cumsum(speed)), .(driver_id, shift_id)] %&gt;% 
+  .[rev_cums_sp == 0|cums_sp == 0, shift_id := 0]
+
+# STATS: pings
+s1[shift_id == 0,.N] # N: 0-speed shifts
+s1[,round(sum(shift_id == 0)*100/.N, 2)] # %: 0-speed shifts
+s1[shift_id != 0,.N] # N: moving shifts
+s1[,round(sum(shift_id != 0)*100/.N, 2)] # %: moving shifts
+
+s_len = s1 %&gt;% 
+  .[shift_id != 0] %&gt;% 
+  .[,.(driver_id, shift_id, shift_length = sum(diff)), .(driver_id, shift_id)]
+
+# STATS: shifts
+s_len[,.N] # unique shifts
+s_len[shift_length &gt; 14*60, .N] # N: very long shifts (&gt;14 hours)
+s_len[, round(sum(shift_length &gt; 14*60)*100/.N, 2)] # %: very long shifts (&gt;14 hours)
+s_len[shift_length &lt;= 0.5*60, .N] # N: very short shifts
+s_len[, round(sum(shift_length &lt;= 0.5*60)*100/.N, 2)] # %: 0.99%
+s_len[shift_length &gt; 0.5*60 &amp; shift_length &lt;= 14*60, .N] # eligible shifts
+s_len[, round(sum(shift_length &gt; 0.5*60 &amp; shift_length &lt;= 14*60)*100/.N, 2)] # %: eligible shifts
+
+
+# filter eligible shifts
+s2 = s1 %&gt;% 
+  .[shift_id != 0] %&gt;% 
+  .[,shift_length := sum(diff), .(driver_id, shift_id)] %&gt;% 
+  .[,.(driver_id, date_time, speed, latitude, longitude, shift_id, shift_length)] %&gt;% 
+  .[shift_length &gt; 30 &amp; shift_length &lt;= 14*60] %&gt;% 
+  .[,shift_length := NULL] %&gt;% 
+  setkey(driver_id, date_time)
+
+# STATS: pings
+s1[shift_id == 0,.N] # 3,550,935 -&gt; shift_id == 0
+s1[,sum(shift_id == 0)/.N] # percent of stopping pings: 26.93% 
+s2[,.N] # 9,349,312
+round(s2[,.N]*100/s1[,.N], 2) # 70.9%</code></pre>
 </div>
 <div id="trip" class="section level2" number="2.2">
 <h2><span class="header-section-number">2.2</span> Trip</h2>
+<pre class="r"><code>threshold_trip = 30
+t1 = s2 %&gt;% 
+  setkey(driver, ping_time) %&gt;% 
+  .[,diff := as.integer(difftime(ping_time, shift(ping_time, 
+               type = &quot;lag&quot;,fill = 0), units = &quot;mins&quot;)), driver] %&gt;%
+  .[,diff := {diff[1] = 0L; diff}, driver] %&gt;% 
+  .[diff &gt;= threshold_trip, speed := 0] %&gt;% 
+  .[,rleid := rleid(speed != 0), driver] %&gt;%
+  .[,`:=`(rleid1 = rleid, speed1 = speed)] %&gt;%
+  .[,`:=`(sum_speed = sum(speed), sum_time = sum(diff)), .(driver, rleid)] %&gt;%
+  .[sum_speed == 0 &amp; sum_time &lt; threshold_trip, speed1 := 3] %&gt;% 
+  .[,`:=`(sum_speed = sum(speed1)), .(driver, rleid)] %&gt;%
+  .[,trip_id := data.table::fifelse(sum_speed == 0, 0, 
+              rleid(speed1 != 0)), driver] %&gt;% 
+  .[trip_id != 0,trip_length := sum(diff), .(driver, trip_id)] %&gt;% 
+  .[,.(driver, ping_time, speed, lat, lon, diff, shift_id, trip_id)]</code></pre>
+<pre class="r"><code>t2 = t1 %&gt;% 
+  .[trip_id != 0,] %&gt;% 
+  .[,`:=`(lon1 = shift(lon, type = &quot;lag&quot;, fill = NA),
+          lat1 = shift(lat, type = &quot;lag&quot;, fill = NA)),
+    by = .(driver, shift_id, trip_id)] %&gt;%
+  .[,distance := geosphere::distHaversine(cbind(lon, lat), cbind(lon1, lat1))] %&gt;%
+  .[,distance := round(distance/1609.344, 3)] %&gt;%
+  .[,distance := {distance[1] = 0; distance}, .(driver, shift_id, trip_id)] %&gt;%
+  .[,c(&quot;lon1&quot;, &quot;lat1&quot;) := NULL] %&gt;%
+  setkey(driver, ping_time)</code></pre>
 </div>
 <div id="minute-intervals" class="section level2" number="2.3">
 <h2><span class="header-section-number">2.3</span> 30-minute intervals</h2>
+<pre class="r"><code># 30-minute intervals
+  dint = dtrip %&gt;%
+    .[,trip_units := ceiling(trip_time/interval_length)] %&gt;%
+    .[rep(seq(.N), trip_units), !c(&quot;trip_time&quot;, &quot;trip_units&quot;)] %&gt;%
+    .[,add1 := 0:(.N-1), by = c(&quot;driver&quot;, &quot;trip_id&quot;)] %&gt;%
+    .[,start_time := start_time[1] + add1*interval_length*60,
+      .(driver, trip_id)] %&gt;%
+    .[,end_time1 := shift(start_time, type = &quot;lead&quot;), .(driver, trip_id)] %&gt;%
+    .[,end_time1 := {end_time1[.N] = end_time[.N]; end_time1}, .(driver, trip_id)] %&gt;%
+    .[,c(&quot;end_time&quot;, &quot;add1&quot;) := NULL] %&gt;%
+    .[, interval_time := as.integer(difftime(end_time1, start_time,
+                                             units = &quot;mins&quot;))] %&gt;%
+    setkey(driver, start_time, end_time1) %&gt;%
+    .[, interval_id := 1:.N, driver] %&gt;%
+    .[, .(interval_id, driver, start_time, end_time = end_time1, interval_time)] %&gt;%
+    setkey(driver, start_time, end_time)
+
+  # merge 30-minute intervals back to ping data
+  d2_interval_id = d1 %&gt;%
+    .[,dummy := ping_time] %&gt;%
+    setkey(driver, ping_time, dummy) %&gt;%
+    foverlaps(dint, type = &quot;within&quot;,
+              by.x = c(&quot;driver&quot;, &quot;ping_time&quot;, &quot;dummy&quot;),
+              mult = &quot;first&quot;, nomatch = NA) %&gt;%
+    .[, dummy := NULL]
+
+  # aggregate ping to 30-minute intervals
+  agg_int30 = d2_interval_id %&gt;%
+    .[!is.na(interval_id) &amp; trip_id != 0,] %&gt;%
+    .[,.(trip_id = trip_id[1], shift_id = shift_id[1],
+         start_time = start_time[1], end_time = end_time[1],
+         interval_time = interval_time[1],
+         start_lat = LATITUDE[1], start_lon = LONGITUDE[1],
+         end_lat = LATITUDE[.N], end_lon = LONGITUDE[.N],
+         n_ping = .N,
+         speed_mean = mean(speed, na.rm = TRUE),
+         speed_sd = sd(speed, na.rm = TRUE),
+         distance = sum(distance, na.rm = TRUE),
+         age = age[1], race = race[1], gender = gender[1],
+         prep_inten = mean(PRECIP_INTENSITY, na.rm = TRUE),
+         prep_prob = mean(PRECIP_PROBABILITY, na.rm = TRUE),
+         wind_speed = mean(WIND_SPEED, na.rm = TRUE),
+         visibility = mean(VISIBILITY, na.rm = TRUE),
+         sunrise = fifelse(sum(DURING_SUNRISE == &quot;Y&quot;, na.rm = TRUE) &gt; 0, 1, 0),
+         sunset = fifelse(sum(DURING_SUNSET == &quot;Y&quot;, na.rm = TRUE) &gt; 0, 1, 0),
+         dusk = fifelse(sum(DURING_DUSK == &quot;Y&quot;, na.rm = TRUE) &gt; 0, 1, 0),
+         dawn = fifelse(sum(DURING_DAWN == &quot;Y&quot;, na.rm = TRUE) &gt; 0, 1, 0)),
+      by = c(&quot;driver&quot;, &quot;interval_id&quot;)] %&gt;%
+    .[,speed_sd := fifelse(is.na(speed_sd), 0, speed_sd)] %&gt;%
+    setkey(driver, interval_id) %&gt;%
+    .[,cumdrive := cumsum(interval_time), .(driver, shift_id)] %&gt;%
+    .[,`:=`(prep_inten = fifelse(is.na(prep_inten), 0, prep_inten),
+            prep_prob = fifelse(is.na(prep_prob), 0, prep_prob),
+            wind_speed = fifelse(is.na(wind_speed), mean(wind_speed, na.rm = TRUE),
+                                 wind_speed),
+            visibility = fifelse(is.na(visibility), mean(visibility, na.rm = TRUE),
+                                 visibility))]
+
+  tokeep = agg_int30 %&gt;%
+    .[,.(maxdrive = max(cumdrive)), .(driver, shift_id)] %&gt;%
+    .[maxdrive &lt;= cumdrive_threshold]
+
+  ce_tab = agg_int30 %&gt;%
+    merge(tokeep, by = c(&quot;driver&quot;, &quot;shift_id&quot;)) %&gt;%
+    .[,maxdrive := NULL]</code></pre>
 </div>
 </div>
 <div id="data-merging" class="section level1" number="3">
@@ -390,6 +464,23 @@ College for Public Health and Social Justice, Saint Louis University<br><h4 clas
 </div>
 <div id="statistical-modeling" class="section level1" number="4">
 <h1><span class="header-section-number">4</span> Statistical modeling</h1>
+<pre class="r"><code>z = d %&gt;% 
+  .[,`:=`(cumdrive = cumdrive/60,
+          CE_binary = fifelse(nCE &gt; 0, 1, 0),
+          race = factor(race, levels = c(&quot;White&quot;, &quot;Black&quot;, &quot;Other&quot;)),
+          gender = factor(gender, levels = c(&quot;M&quot;, &quot;F&quot;, &quot;U&quot;)))]
+
+f_logit = glm(CE_binary ~ cumdrive + speed_mean + speed_sd + age + race + gender +
+                prep_inten + prep_prob + wind_speed + visibility + interval_time, 
+              family = &quot;binomial&quot;, data = z)
+summary(f_logit)
+
+
+f_nb = glm.nb(nCE ~ cumdrive + speed_mean + speed_sd + age + race + gender +
+                prep_inten + prep_prob + wind_speed + visibility + 
+                offset(log(interval_time)), 
+                data = z)
+summary(f_nb)</code></pre>
 </div>
 <div id="model-comparison" class="section level1" number="5">
 <h1><span class="header-section-number">5</span> Model comparison</h1>
@@ -397,35 +488,6 @@ College for Public Health and Social Justice, Saint Louis University<br><h4 clas
 <div id="session-info" class="section level1" number="6">
 <h1><span class="header-section-number">6</span> Session info</h1>
 <pre class="r"><code>sessionInfo()</code></pre>
-<pre><code>## R version 4.1.0 (2021-05-18)
-## Platform: x86_64-w64-mingw32/x64 (64-bit)
-## Running under: Windows 10 x64 (build 19042)
-## 
-## Matrix products: default
-## 
-## locale:
-## [1] LC_COLLATE=Chinese (Simplified)_China.936 
-## [2] LC_CTYPE=Chinese (Simplified)_China.936   
-## [3] LC_MONETARY=Chinese (Simplified)_China.936
-## [4] LC_NUMERIC=C                              
-## [5] LC_TIME=C                                 
-## 
-## attached base packages:
-## [1] stats     graphics  grDevices utils     datasets  methods   base     
-## 
-## other attached packages:
-## [1] lubridate_1.7.10  data.table_1.14.0 dplyr_1.0.7       DT_0.18          
-## 
-## loaded via a namespace (and not attached):
-##  [1] Rcpp_1.0.6        knitr_1.33        magrittr_2.0.1    tidyselect_1.1.1 
-##  [5] R6_2.5.0          rlang_0.4.11      fansi_0.5.0       stringr_1.4.0    
-##  [9] tools_4.1.0       xfun_0.23         pacman_0.5.1      utf8_1.2.1       
-## [13] DBI_1.1.1         jquerylib_0.1.4   htmltools_0.5.1.1 ellipsis_0.3.2   
-## [17] assertthat_0.2.1  yaml_2.2.1        digest_0.6.27     tibble_3.1.2     
-## [21] lifecycle_1.0.0   crayon_1.4.1      purrr_0.3.4       sass_0.4.0       
-## [25] htmlwidgets_1.5.3 vctrs_0.3.8       glue_1.4.2        evaluate_0.14    
-## [29] rmarkdown_2.8     stringi_1.6.2     compiler_4.1.0    bslib_0.2.5.1    
-## [33] pillar_1.6.1      generics_0.1.0    jsonlite_1.7.2    pkgconfig_2.0.3</code></pre>
 </div>
 <div class="footnotes">
 <hr />

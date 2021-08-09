@@ -41,7 +41,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
 ```
 
 
@@ -51,7 +51,7 @@ Due to our contract with our industrial partner about data security, we cannot s
 First, we need to load some necessary libraries.
 
 ```{r}
-pacman::p_load(DT, dplyr, data.table, lubridate)
+pacman::p_load(DT, dplyr, data.table, lubridate, lme4, broom.mixed)
 ```
 
 
@@ -96,14 +96,178 @@ Data aggregation
 Shift
 -----
 
+```{r}
+threshold_shift = 8*60
+
+s1 = ping %>% 
+  .[!is.na(date_time)] %>% 
+  setkey(driver_id, date_time) %>% 
+  .[,diff := as.integer(difftime(date_time, 
+                shift(date_time, type = "lag",
+                      fill = 0), units = "mins")), driver_id] %>%
+  .[,diff := {diff[1] = 0L; diff}, driver_id] %>% 
+  .[diff >= threshold_shift|speed <= 10, speed := 0] %>% 
+  .[,rleid := rleid(speed != 0), driver_id] %>%
+  .[,`:=`(speed1 = speed)] %>%
+  .[,`:=`(sum_speed = sum(speed), sum_time = sum(diff)), .(driver_id, rleid)] %>%
+  .[sum_speed == 0 & sum_time < threshold_shift, speed1 := 3] %>% 
+  .[,`:=`(sum_speed = sum(speed1)), .(driver_id, rleid)] %>%
+  .[,shift_id := fifelse(sum_speed == 0, 0, rleid(speed1 != 0)), driver_id] %>% 
+  .[,`:=`(rev_cums_sp = rev(cumsum(rev(speed))),
+          cums_sp = cumsum(speed)), .(driver_id, shift_id)] %>% 
+  .[rev_cums_sp == 0|cums_sp == 0, shift_id := 0]
+
+# STATS: pings
+s1[shift_id == 0,.N] # N: 0-speed shifts
+s1[,round(sum(shift_id == 0)*100/.N, 2)] # %: 0-speed shifts
+s1[shift_id != 0,.N] # N: moving shifts
+s1[,round(sum(shift_id != 0)*100/.N, 2)] # %: moving shifts
+
+s_len = s1 %>% 
+  .[shift_id != 0] %>% 
+  .[,.(driver_id, shift_id, shift_length = sum(diff)), .(driver_id, shift_id)]
+
+# STATS: shifts
+s_len[,.N] # unique shifts
+s_len[shift_length > 14*60, .N] # N: very long shifts (>14 hours)
+s_len[, round(sum(shift_length > 14*60)*100/.N, 2)] # %: very long shifts (>14 hours)
+s_len[shift_length <= 0.5*60, .N] # N: very short shifts
+s_len[, round(sum(shift_length <= 0.5*60)*100/.N, 2)] # %: 0.99%
+s_len[shift_length > 0.5*60 & shift_length <= 14*60, .N] # eligible shifts
+s_len[, round(sum(shift_length > 0.5*60 & shift_length <= 14*60)*100/.N, 2)] # %: eligible shifts
+
+
+# filter eligible shifts
+s2 = s1 %>% 
+  .[shift_id != 0] %>% 
+  .[,shift_length := sum(diff), .(driver_id, shift_id)] %>% 
+  .[,.(driver_id, date_time, speed, latitude, longitude, shift_id, shift_length)] %>% 
+  .[shift_length > 30 & shift_length <= 14*60] %>% 
+  .[,shift_length := NULL] %>% 
+  setkey(driver_id, date_time)
+
+# STATS: pings
+s1[shift_id == 0,.N] # 3,550,935 -> shift_id == 0
+s1[,sum(shift_id == 0)/.N] # percent of stopping pings: 26.93% 
+s2[,.N] # 9,349,312
+round(s2[,.N]*100/s1[,.N], 2) # 70.9%
+```
+
+
 
 Trip
 ----
+
+```{r}
+threshold_trip = 30
+t1 = s2 %>% 
+  setkey(driver, ping_time) %>% 
+  .[,diff := as.integer(difftime(ping_time, shift(ping_time, 
+               type = "lag",fill = 0), units = "mins")), driver] %>%
+  .[,diff := {diff[1] = 0L; diff}, driver] %>% 
+  .[diff >= threshold_trip, speed := 0] %>% 
+  .[,rleid := rleid(speed != 0), driver] %>%
+  .[,`:=`(rleid1 = rleid, speed1 = speed)] %>%
+  .[,`:=`(sum_speed = sum(speed), sum_time = sum(diff)), .(driver, rleid)] %>%
+  .[sum_speed == 0 & sum_time < threshold_trip, speed1 := 3] %>% 
+  .[,`:=`(sum_speed = sum(speed1)), .(driver, rleid)] %>%
+  .[,trip_id := data.table::fifelse(sum_speed == 0, 0, 
+              rleid(speed1 != 0)), driver] %>% 
+  .[trip_id != 0,trip_length := sum(diff), .(driver, trip_id)] %>% 
+  .[,.(driver, ping_time, speed, lat, lon, diff, shift_id, trip_id)]
+
+
+```
+
+
+```{r}
+t2 = t1 %>% 
+  .[trip_id != 0,] %>% 
+  .[,`:=`(lon1 = shift(lon, type = "lag", fill = NA),
+          lat1 = shift(lat, type = "lag", fill = NA)),
+    by = .(driver, shift_id, trip_id)] %>%
+  .[,distance := geosphere::distHaversine(cbind(lon, lat), cbind(lon1, lat1))] %>%
+  .[,distance := round(distance/1609.344, 3)] %>%
+  .[,distance := {distance[1] = 0; distance}, .(driver, shift_id, trip_id)] %>%
+  .[,c("lon1", "lat1") := NULL] %>%
+  setkey(driver, ping_time)
+```
 
 
 
 30-minute intervals
 -------------------
+
+```{r}
+# 30-minute intervals
+  dint = dtrip %>%
+    .[,trip_units := ceiling(trip_time/interval_length)] %>%
+    .[rep(seq(.N), trip_units), !c("trip_time", "trip_units")] %>%
+    .[,add1 := 0:(.N-1), by = c("driver", "trip_id")] %>%
+    .[,start_time := start_time[1] + add1*interval_length*60,
+      .(driver, trip_id)] %>%
+    .[,end_time1 := shift(start_time, type = "lead"), .(driver, trip_id)] %>%
+    .[,end_time1 := {end_time1[.N] = end_time[.N]; end_time1}, .(driver, trip_id)] %>%
+    .[,c("end_time", "add1") := NULL] %>%
+    .[, interval_time := as.integer(difftime(end_time1, start_time,
+                                             units = "mins"))] %>%
+    setkey(driver, start_time, end_time1) %>%
+    .[, interval_id := 1:.N, driver] %>%
+    .[, .(interval_id, driver, start_time, end_time = end_time1, interval_time)] %>%
+    setkey(driver, start_time, end_time)
+
+  # merge 30-minute intervals back to ping data
+  d2_interval_id = d1 %>%
+    .[,dummy := ping_time] %>%
+    setkey(driver, ping_time, dummy) %>%
+    foverlaps(dint, type = "within",
+              by.x = c("driver", "ping_time", "dummy"),
+              mult = "first", nomatch = NA) %>%
+    .[, dummy := NULL]
+
+  # aggregate ping to 30-minute intervals
+  agg_int30 = d2_interval_id %>%
+    .[!is.na(interval_id) & trip_id != 0,] %>%
+    .[,.(trip_id = trip_id[1], shift_id = shift_id[1],
+         start_time = start_time[1], end_time = end_time[1],
+         interval_time = interval_time[1],
+         start_lat = LATITUDE[1], start_lon = LONGITUDE[1],
+         end_lat = LATITUDE[.N], end_lon = LONGITUDE[.N],
+         n_ping = .N,
+         speed_mean = mean(speed, na.rm = TRUE),
+         speed_sd = sd(speed, na.rm = TRUE),
+         distance = sum(distance, na.rm = TRUE),
+         age = age[1], race = race[1], gender = gender[1],
+         prep_inten = mean(PRECIP_INTENSITY, na.rm = TRUE),
+         prep_prob = mean(PRECIP_PROBABILITY, na.rm = TRUE),
+         wind_speed = mean(WIND_SPEED, na.rm = TRUE),
+         visibility = mean(VISIBILITY, na.rm = TRUE),
+         sunrise = fifelse(sum(DURING_SUNRISE == "Y", na.rm = TRUE) > 0, 1, 0),
+         sunset = fifelse(sum(DURING_SUNSET == "Y", na.rm = TRUE) > 0, 1, 0),
+         dusk = fifelse(sum(DURING_DUSK == "Y", na.rm = TRUE) > 0, 1, 0),
+         dawn = fifelse(sum(DURING_DAWN == "Y", na.rm = TRUE) > 0, 1, 0)),
+      by = c("driver", "interval_id")] %>%
+    .[,speed_sd := fifelse(is.na(speed_sd), 0, speed_sd)] %>%
+    setkey(driver, interval_id) %>%
+    .[,cumdrive := cumsum(interval_time), .(driver, shift_id)] %>%
+    .[,`:=`(prep_inten = fifelse(is.na(prep_inten), 0, prep_inten),
+            prep_prob = fifelse(is.na(prep_prob), 0, prep_prob),
+            wind_speed = fifelse(is.na(wind_speed), mean(wind_speed, na.rm = TRUE),
+                                 wind_speed),
+            visibility = fifelse(is.na(visibility), mean(visibility, na.rm = TRUE),
+                                 visibility))]
+
+  tokeep = agg_int30 %>%
+    .[,.(maxdrive = max(cumdrive)), .(driver, shift_id)] %>%
+    .[maxdrive <= cumdrive_threshold]
+
+  ce_tab = agg_int30 %>%
+    merge(tokeep, by = c("driver", "shift_id")) %>%
+    .[,maxdrive := NULL]
+```
+
+
+
 
 
 Data merging
@@ -114,6 +278,26 @@ Data merging
 Statistical modeling
 ====================
 
+```{r}
+z = d %>% 
+  .[,`:=`(cumdrive = cumdrive/60,
+          CE_binary = fifelse(nCE > 0, 1, 0),
+          race = factor(race, levels = c("White", "Black", "Other")),
+          gender = factor(gender, levels = c("M", "F", "U")))]
+
+f_logit = glm(CE_binary ~ cumdrive + speed_mean + speed_sd + age + race + gender +
+                prep_inten + prep_prob + wind_speed + visibility + interval_time, 
+              family = "binomial", data = z)
+summary(f_logit)
+
+
+f_nb = glm.nb(nCE ~ cumdrive + speed_mean + speed_sd + age + race + gender +
+                prep_inten + prep_prob + wind_speed + visibility + 
+                offset(log(interval_time)), 
+                data = z)
+summary(f_nb)
+
+```
 
 
 Model comparison
