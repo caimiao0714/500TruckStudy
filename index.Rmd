@@ -41,17 +41,17 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 ```
 
 
 Due to our contract with our industrial partner about data security, we cannot share any of our original data. Therefore, all the data sets present here are simulated for demonstration purposes. They do not reflect the true demographics, driving patterns, or the unsafe driving events.
 
 
-First, we need to load some necessary libraries.
+
 
 ```{r}
-pacman::p_load(DT, dplyr, data.table, lubridate, lme4, broom.mixed)
+pacman::p_load(MASS, lme4, finalfit, DT, dplyr, data.table, lubridate, broom.mixed, purrr)
 ```
 
 
@@ -61,18 +61,26 @@ Data Description
 Ping
 ----
 
+The in-vehicle data acquisition system pinged irregularly as the vehicle goes on road, and it collects several key variables at a certain time point, the date and time (`ping_time`), latitude and longitude (`latitude` and `longitude`), a unique driver identification number (`driver_id`), and speed at that time point (`speed`). 
+
 ```{r}
 (ping = fread('Data/ping.csv'))
 ```
 
 
-SCEs
-----
+Safety-critical events (SCEs)
+-----------------------------
 
 ```{r}
-(sce = fread('Data/ping.csv'))
+(sce = fread('Data/SCEs.csv'))
 ```
 
+Safety-critical events (SCEs) were collected using in-vehicle sensors, and these data were collected independent of the pings data. SCEs were recorded every time pre-determined kinematic thresholds were triggered.
+
+- *Headway*: the truck tailgated for at least 118 seconds at an unsafe gap time no more197than 2.8 seconds.
+- *Hard brakes*: the truck decelerates at a rate of at least 9.5 miles per hour per second.
+- *Collision mitigation*: the automatic activation of the forward collision mitigation system to200avoid crashes.
+- *Rolling stability*: the activation of brake pressure system to assist the driver to balance the202vehicle in crtical circumstances.
 
 Weather
 -------
@@ -80,6 +88,9 @@ Weather
 ```{r}
 (weather = fread('Data/weather.csv'))
 ```
+
+Historic weather data were obtained from the [DarkSky Application Programming Interface (API)](https://blog.darksky.net/), which enables us to query historic real-time and hour-by-hour nationwide weather conditions according to latitude, longitude, date, and time. The sample weather data were queried in the DarkSky API database based on the latitude, longitude, date, and hour.
+
 
 Driver demographics
 -------------------
@@ -89,21 +100,31 @@ Driver demographics
 ```
 
 
-Data aggregation
-================
+
+Data aggregation and merging
+============================
 ![Aggregating ping into shifts, trips, and 30-minute intervals](Figures/ping_data_aggregation.svg)
+
+To convert the real-time ping data into statistically analyzable units, we aggregate them into *shifts*, *trips*, and *30-minute intervals*, and this aggregation process is presented in the above figure. This aggregation process is inspired by real-world truck transporting practice and [the hours-of-service regulation](https://www.fmcsa.dot.gov/regulations/hours-service/summary-hours-service-regulations), where property-carrying drivers are required to take breaks after long hours of driving on road. Shifts are on-duty periods with no breaks longer than eight hours (there can be short breaks less than 8 hours, i.e., several short breaks within a long shift). Trips are continuous driving periods with no breaks that are longer than half an hour. These trips are further divided into fixed 30-minute intervals. This is because the length of trips can vary from several minutes to several hours, which are not homogeneous analyzable units for statistical modeling or other predictive models.
+
+
 
 Shift
 -----
 
+> **Shifts**: For each of the sample truck drivers, if the ping data showed that the truck was not moving for more than eight hours, the ping data were separated into two different shifts on the left and right side of this long break. There could be several short breaks (less than eight hours) within each shift.
+
+
+The code below creates index for shifts for each ping (`shift_id`).
+
 ```{r}
-threshold_shift = 8*60
+threshold_shift = 8*60 # 8 hours breaking threshold for trips
 
 s1 = ping %>% 
-  .[!is.na(date_time)] %>% 
-  setkey(driver_id, date_time) %>% 
-  .[,diff := as.integer(difftime(date_time, 
-                shift(date_time, type = "lag",
+  .[!is.na(ping_time)] %>% 
+  setkey(driver_id, ping_time) %>% 
+  .[,diff := as.integer(difftime(ping_time, 
+                shift(ping_time, type = "lag",
                       fill = 0), units = "mins")), driver_id] %>%
   .[,diff := {diff[1] = 0L; diff}, driver_id] %>% 
   .[diff >= threshold_shift|speed <= 10, speed := 0] %>% 
@@ -117,40 +138,16 @@ s1 = ping %>%
           cums_sp = cumsum(speed)), .(driver_id, shift_id)] %>% 
   .[rev_cums_sp == 0|cums_sp == 0, shift_id := 0]
 
-# STATS: pings
-s1[shift_id == 0,.N] # N: 0-speed shifts
-s1[,round(sum(shift_id == 0)*100/.N, 2)] # %: 0-speed shifts
-s1[shift_id != 0,.N] # N: moving shifts
-s1[,round(sum(shift_id != 0)*100/.N, 2)] # %: moving shifts
-
-s_len = s1 %>% 
-  .[shift_id != 0] %>% 
-  .[,.(driver_id, shift_id, shift_length = sum(diff)), .(driver_id, shift_id)]
-
-# STATS: shifts
-s_len[,.N] # unique shifts
-s_len[shift_length > 14*60, .N] # N: very long shifts (>14 hours)
-s_len[, round(sum(shift_length > 14*60)*100/.N, 2)] # %: very long shifts (>14 hours)
-s_len[shift_length <= 0.5*60, .N] # N: very short shifts
-s_len[, round(sum(shift_length <= 0.5*60)*100/.N, 2)] # %: 0.99%
-s_len[shift_length > 0.5*60 & shift_length <= 14*60, .N] # eligible shifts
-s_len[, round(sum(shift_length > 0.5*60 & shift_length <= 14*60)*100/.N, 2)] # %: eligible shifts
-
-
-# filter eligible shifts
-s2 = s1 %>% 
+# Exclude very short and very long shifts (based on the hours-of-service regulation).
+d_shift_index = s1 %>% 
   .[shift_id != 0] %>% 
   .[,shift_length := sum(diff), .(driver_id, shift_id)] %>% 
-  .[,.(driver_id, date_time, speed, latitude, longitude, shift_id, shift_length)] %>% 
+  .[,.(ping_id, driver_id, ping_time, speed, latitude, longitude, shift_id, shift_length)] %>% 
   .[shift_length > 30 & shift_length <= 14*60] %>% 
   .[,shift_length := NULL] %>% 
-  setkey(driver_id, date_time)
+  setkey(driver_id, ping_time)
 
-# STATS: pings
-s1[shift_id == 0,.N] # 3,550,935 -> shift_id == 0
-s1[,sum(shift_id == 0)/.N] # percent of stopping pings: 26.93% 
-s2[,.N] # 9,349,312
-round(s2[,.N]*100/s1[,.N], 2) # 70.9%
+print(d_shift_index)
 ```
 
 
@@ -158,151 +155,296 @@ round(s2[,.N]*100/s1[,.N], 2) # 70.9%
 Trip
 ----
 
+> **Trips**: For each shift, if the ping data showed that the truck was not moving for more than half an hour, the ping data were separated into different trips. These ping data were then aggregated into different trips. The drivers are assumed to be fully driving within each trip since there are no breaks longer than 30 minutes within each trip. The trips are nested within shifts.
+
+The code below cuts shifts into trips: index pings with `trip_id`.
+
 ```{r}
-threshold_trip = 30
-t1 = s2 %>% 
-  setkey(driver, ping_time) %>% 
-  .[,diff := as.integer(difftime(ping_time, shift(ping_time, 
-               type = "lag",fill = 0), units = "mins")), driver] %>%
-  .[,diff := {diff[1] = 0L; diff}, driver] %>% 
+threshold_trip = 30 # 30 minutes breaking threshold for trips
+
+d_trip_index = d_shift_index %>% 
+  setkey(driver_id, ping_time) %>% 
+  .[,diff := as.integer(difftime(
+    ping_time, shift(ping_time, type = "lag",fill = 0), units = "mins")), driver_id] %>%
+  .[,diff := {diff[1] = 0L; diff}, driver_id] %>% 
   .[diff >= threshold_trip, speed := 0] %>% 
-  .[,rleid := rleid(speed != 0), driver] %>%
+  .[,rleid := rleid(speed != 0), driver_id] %>%
   .[,`:=`(rleid1 = rleid, speed1 = speed)] %>%
-  .[,`:=`(sum_speed = sum(speed), sum_time = sum(diff)), .(driver, rleid)] %>%
+  .[,`:=`(sum_speed = sum(speed), sum_time = sum(diff)), .(driver_id, rleid)] %>%
   .[sum_speed == 0 & sum_time < threshold_trip, speed1 := 3] %>% 
-  .[,`:=`(sum_speed = sum(speed1)), .(driver, rleid)] %>%
+  .[,`:=`(sum_speed = sum(speed1)), .(driver_id, rleid)] %>%
   .[,trip_id := data.table::fifelse(sum_speed == 0, 0, 
-              rleid(speed1 != 0)), driver] %>% 
-  .[trip_id != 0,trip_length := sum(diff), .(driver, trip_id)] %>% 
-  .[,.(driver, ping_time, speed, lat, lon, diff, shift_id, trip_id)]
+                                    rleid(speed1 != 0)), driver_id] %>% 
+  .[trip_id != 0,trip_length := sum(diff), .(driver_id, trip_id)] %>% 
+  .[,.(ping_id, driver_id, ping_time, speed, latitude, longitude, diff, shift_id, trip_id)] %>% 
+  .[trip_id != 0,] %>% # exclude stopped trips
+  .[,`:=`(lon1 = shift(longitude, type = "lag", fill = NA),
+          lat1 = shift(latitude, type = "lag", fill = NA)),
+    by = .(driver_id, shift_id, trip_id)] %>%
+  .[,distance := geosphere::distHaversine( # calculate distance based on the Haversine method
+    cbind(longitude, latitude),
+    cbind(lon1, lat1))] %>%
+  .[,distance := round(distance/1609.344, 3)] %>%
+  .[,distance := {distance[1] = 0; distance}, .(driver_id, shift_id, trip_id)] %>%
+  .[,c("lon1", "lat1") := NULL] %>%
+  setkey(driver_id, ping_time)
 
-
+print(d_trip_index)
 ```
 
+
+The code below creates a trip data set that include the start and end time and location of the trips.
 
 ```{r}
-t2 = t1 %>% 
-  .[trip_id != 0,] %>% 
-  .[,`:=`(lon1 = shift(lon, type = "lag", fill = NA),
-          lat1 = shift(lat, type = "lag", fill = NA)),
-    by = .(driver, shift_id, trip_id)] %>%
-  .[,distance := geosphere::distHaversine(cbind(lon, lat), cbind(lon1, lat1))] %>%
-  .[,distance := round(distance/1609.344, 3)] %>%
-  .[,distance := {distance[1] = 0; distance}, .(driver, shift_id, trip_id)] %>%
-  .[,c("lon1", "lat1") := NULL] %>%
-  setkey(driver, ping_time)
+d_trip = d_trip_index %>%
+  .[trip_id != 0,] %>%
+  setkey(driver_id, ping_time) %>%
+  .[,.(start_time = ping_time[1], end_time = ping_time[.N],
+       start_lat = latitude[1], start_lon = longitude[1],
+       end_lat = latitude[.N], end_lon = longitude[.N],
+       speed_mean = mean(speed, na.rm = TRUE),
+       speed_sd = sd(speed, na.rm = TRUE),
+       distance = sum(distance, na.rm = TRUE)),
+    .(driver_id, shift_id, trip_id)] %>%
+  .[,`:=`(trip_time = as.integer(difftime(end_time, start_time,
+                                          units = "mins")))] %>%
+  .[order(driver_id, trip_id)]
+
+print(d_trip)
 ```
+
 
 
 
 30-minute intervals
 -------------------
 
+> **30-minute intervals**: Each trip is further decomposed into 30-minute intervals according to the start and end time of the trip. The last interval of the trip is typically less than 30 minutes. The 30-minute intervals are nested within trips. These 30-minute intervals are more homogeneous in length and has higher resolution, and can yield better predictive performance compared to trips, which are highly heterogeneous in length.
+
+The code below creates 30-minute interval data based on the trips data (d_trip).
+
 ```{r}
-# 30-minute intervals
-  dint = dtrip %>%
-    .[,trip_units := ceiling(trip_time/interval_length)] %>%
-    .[rep(seq(.N), trip_units), !c("trip_time", "trip_units")] %>%
-    .[,add1 := 0:(.N-1), by = c("driver", "trip_id")] %>%
-    .[,start_time := start_time[1] + add1*interval_length*60,
-      .(driver, trip_id)] %>%
-    .[,end_time1 := shift(start_time, type = "lead"), .(driver, trip_id)] %>%
-    .[,end_time1 := {end_time1[.N] = end_time[.N]; end_time1}, .(driver, trip_id)] %>%
-    .[,c("end_time", "add1") := NULL] %>%
-    .[, interval_time := as.integer(difftime(end_time1, start_time,
-                                             units = "mins"))] %>%
-    setkey(driver, start_time, end_time1) %>%
-    .[, interval_id := 1:.N, driver] %>%
-    .[, .(interval_id, driver, start_time, end_time = end_time1, interval_time)] %>%
-    setkey(driver, start_time, end_time)
+interval_length = 30 # 30 minute intervals
 
-  # merge 30-minute intervals back to ping data
-  d2_interval_id = d1 %>%
-    .[,dummy := ping_time] %>%
-    setkey(driver, ping_time, dummy) %>%
-    foverlaps(dint, type = "within",
-              by.x = c("driver", "ping_time", "dummy"),
-              mult = "first", nomatch = NA) %>%
-    .[, dummy := NULL]
+d_interval = d_trip %>%
+  copy() %>% 
+  .[,trip_units := ceiling(trip_time/interval_length)] %>%
+  .[rep(seq(.N), trip_units), !c("trip_time", "trip_units")] %>%
+  .[,add1 := 0:(.N-1), by = c("driver_id", "trip_id")] %>%
+  .[,start_time := start_time[1] + add1*interval_length*60,
+    .(driver_id, trip_id)] %>%
+  .[,end_time1 := shift(start_time, type = "lead"), .(driver_id, trip_id)] %>%
+  .[,end_time1 := {end_time1[.N] = end_time[.N]; end_time1}, .(driver_id, trip_id)] %>%
+  .[,c("end_time", "add1") := NULL] %>%
+  .[, interval_time := as.integer(
+    difftime(end_time1, start_time, units = "mins"))] %>%
+  setkey(driver_id, start_time, end_time1) %>%
+  .[, interval_id := 1:.N] %>%
+  .[, .(interval_id, driver_id, start_time, end_time = end_time1, interval_time)] %>%
+  setkey(driver_id, start_time, end_time)
 
-  # aggregate ping to 30-minute intervals
-  agg_int30 = d2_interval_id %>%
-    .[!is.na(interval_id) & trip_id != 0,] %>%
-    .[,.(trip_id = trip_id[1], shift_id = shift_id[1],
-         start_time = start_time[1], end_time = end_time[1],
-         interval_time = interval_time[1],
-         start_lat = LATITUDE[1], start_lon = LONGITUDE[1],
-         end_lat = LATITUDE[.N], end_lon = LONGITUDE[.N],
-         n_ping = .N,
-         speed_mean = mean(speed, na.rm = TRUE),
-         speed_sd = sd(speed, na.rm = TRUE),
-         distance = sum(distance, na.rm = TRUE),
-         age = age[1], race = race[1], gender = gender[1],
-         prep_inten = mean(PRECIP_INTENSITY, na.rm = TRUE),
-         prep_prob = mean(PRECIP_PROBABILITY, na.rm = TRUE),
-         wind_speed = mean(WIND_SPEED, na.rm = TRUE),
-         visibility = mean(VISIBILITY, na.rm = TRUE),
-         sunrise = fifelse(sum(DURING_SUNRISE == "Y", na.rm = TRUE) > 0, 1, 0),
-         sunset = fifelse(sum(DURING_SUNSET == "Y", na.rm = TRUE) > 0, 1, 0),
-         dusk = fifelse(sum(DURING_DUSK == "Y", na.rm = TRUE) > 0, 1, 0),
-         dawn = fifelse(sum(DURING_DAWN == "Y", na.rm = TRUE) > 0, 1, 0)),
-      by = c("driver", "interval_id")] %>%
-    .[,speed_sd := fifelse(is.na(speed_sd), 0, speed_sd)] %>%
-    setkey(driver, interval_id) %>%
-    .[,cumdrive := cumsum(interval_time), .(driver, shift_id)] %>%
-    .[,`:=`(prep_inten = fifelse(is.na(prep_inten), 0, prep_inten),
-            prep_prob = fifelse(is.na(prep_prob), 0, prep_prob),
-            wind_speed = fifelse(is.na(wind_speed), mean(wind_speed, na.rm = TRUE),
-                                 wind_speed),
-            visibility = fifelse(is.na(visibility), mean(visibility, na.rm = TRUE),
-                                 visibility))]
+print(d_interval)
+```
 
-  tokeep = agg_int30 %>%
-    .[,.(maxdrive = max(cumdrive)), .(driver, shift_id)] %>%
-    .[maxdrive <= cumdrive_threshold]
+The code below merges 30-minute intervals back to ping data.
 
-  ce_tab = agg_int30 %>%
-    merge(tokeep, by = c("driver", "shift_id")) %>%
-    .[,maxdrive := NULL]
+```{r}
+d_interval_id = d_trip_index %>%
+  .[,ping_time_floor := lubridate::floor_date(ping_time, "hours")] %>% 
+  merge.data.table(weather, 
+                   by.x = c("ping_time_floor", "latitude", "longitude"), 
+                   by.y = c("date_time", "latitude", "longitude"), 
+                   all.x = TRUE) %>%
+  merge.data.table(demographics[,.(driver_id, age, race, gender)], 
+                   by = "driver_id", 
+                   all.x = TRUE) %>% 
+  .[,dummy := ping_time] %>%
+  setkey(driver_id, ping_time, dummy) %>%
+  foverlaps(d_interval, type = "within",
+            by.x = c("driver_id", "ping_time", "dummy"),
+            mult = "first", nomatch = NA) %>%
+  .[, dummy := NULL] %>%
+  .[!is.na(interval_id) & trip_id != 0,]
+
+print(d_interval_id)
 ```
 
 
+Aggregate pings data at 30-minute interval level
+------------------------------------------------
+
+```{r}
+# aggregate ping to 30-minute intervals
+interval_aggregated = d_interval_id %>%
+  .[,.(trip_id = trip_id[1], shift_id = shift_id[1], 
+       start_time = start_time[1], end_time = end_time[1],
+       interval_time = interval_time[1],
+       start_lat = latitude[1], start_lon = longitude[1],
+       end_lat = latitude[.N], end_lon = longitude[.N],
+       n_ping = .N,
+       speed_mean = mean(speed, na.rm = TRUE),
+       speed_sd = sd(speed, na.rm = TRUE),
+       distance = sum(distance, na.rm = TRUE),
+       age = age[1], race = race[1], gender = gender[1],
+       precipitation_intensity = mean(precipitation_intensity, na.rm = TRUE),
+       precipitation_probability = mean(precipitation_probability, na.rm = TRUE),
+       wind_speed = mean(wind_speed, na.rm = TRUE),
+       visibility = mean(visibility, na.rm = TRUE)),
+    by = c("driver_id", "interval_id")] %>%
+  .[,speed_sd := fifelse(is.na(speed_sd), 0, speed_sd)] %>%
+  setkey(driver_id, interval_id) %>%
+  .[,cumu_drive := cumsum(interval_time), .(driver_id, shift_id)]
+
+print(interval_aggregated)
+```
 
 
+Merge SCEs to the aggregated 30-minute interval data
+----------------------------------------------------
 
-Data merging
-===============
+The code below creates interval index for each SCE
+
+```{r}
+interval_for_SCE = interval_aggregated %>% 
+  .[,.(interval_id, driver_id, start_time, end_time)] %>% 
+  setkey(driver_id, start_time, end_time)
+
+sce_index = sce %>% 
+    .[,dummy := event_time] %>% 
+    setkey(driver_id, event_time, dummy) %>% 
+    foverlaps(interval_for_SCE, mult = "all", type = "within", nomatch = NA) %>% 
+    .[!is.na(interval_id),] %>% 
+    .[,.(interval_id, driver_id, event_time, event_type)]
+
+n_sce_interval = sce_index %>% 
+  .[,.(sce_N = .N), interval_id] %>% 
+  .[,sce_binary := fifelse(sce_N > 0, 1, 0)]
+
+print(n_sce_interval)
+```
+
+
+The code merges SCE data back to the aggregated 30-minute interval data.
+
+```{r}
+interval_4_analysis = interval_aggregated %>% 
+  merge.data.table(n_sce_interval, by = 'interval_id', all.x = TRUE) %>% 
+  .[,`:=`(sce_N = fifelse(is.na(sce_N), 0, sce_N),
+          sce_binary = fifelse(is.na(sce_binary), 0, sce_binary),
+          cumu_drive_hour = cumu_drive/60)]
+```
 
 
 
 Statistical modeling
 ====================
 
+Logistic regression
+-------------------
+
 ```{r}
-z = d %>% 
-  .[,`:=`(cumdrive = cumdrive/60,
-          CE_binary = fifelse(nCE > 0, 1, 0),
-          race = factor(race, levels = c("White", "Black", "Other")),
-          gender = factor(gender, levels = c("M", "F", "U")))]
+fit_logit = glm(
+  sce_binary ~ cumu_drive_hour + speed_mean + speed_sd + age + race + gender +
+    precipitation_intensity + precipitation_probability + wind_speed + visibility + 
+    interval_time,
+  data = interval_4_analysis,
+  family = binomial(link = "logit")
+)
+tidy(fit_logit)
+```
 
-f_logit = glm(CE_binary ~ cumdrive + speed_mean + speed_sd + age + race + gender +
-                prep_inten + prep_prob + wind_speed + visibility + interval_time, 
-              family = "binomial", data = z)
-summary(f_logit)
+Negative binomial regression
+----------------------------
+
+```{r}
+fit_nb = glm.nb(
+  sce_N ~ cumu_drive_hour + speed_mean + speed_sd + age + race + gender +
+    precipitation_intensity + precipitation_probability + wind_speed + visibility +
+    offset(log(interval_time)),
+  data = interval_4_analysis
+)
+tidy(fit_nb)
+```
+
+Random-effects logistic regression
+----------------------------------
+
+```{r}
+fit_random_logit = glmer(
+  sce_binary ~ cumu_drive_hour + speed_mean + speed_sd + age + race + gender +
+    precipitation_intensity + precipitation_probability + wind_speed + visibility +
+    interval_time + (1 + cumu_drive_hour | driver_id),
+  data = interval_4_analysis,
+  family = binomial(link = "logit"),
+  nAGQ = 0L,
+  control = glmerControl(optimizer = "bobyqa",
+                         calc.derivs = FALSE)
+)
+tidy(fit_random_logit)
+```
 
 
-f_nb = glm.nb(nCE ~ cumdrive + speed_mean + speed_sd + age + race + gender +
-                prep_inten + prep_prob + wind_speed + visibility + 
-                offset(log(interval_time)), 
-                data = z)
-summary(f_nb)
+Random-effects negative binomial regression
+-------------------------------------------
 
+```{r}
+fit_random_nb = glmer.nb(
+  sce_N ~ cumu_drive_hour + speed_mean + speed_sd + age + race + gender +
+    precipitation_intensity + precipitation_probability + wind_speed + visibility +
+    offset(log(interval_time)) + (1 + cumu_drive_hour | driver_id),
+  data = interval_4_analysis,
+  nAGQ = 0L,
+  control = glmerControl(optimizer = "bobyqa",
+                         calc.derivs = FALSE),
+  # Theta from a previous fitted negative binomial regression
+  initCtrl = list(theta = fit_nb$theta) 
+)
+tidy(fit_random_nb)
 ```
 
 
 Model comparison
 ================
 
+We can extract the model fit statistics of these four different models using the code below.
+
+```{r}
+get_fit = function(fit) {
+
+  c_stats = finalfit::ff_metrics(fit) %>%
+    unlist %>%
+    as.character %>%
+    gsub(".+(C-statistic = )(0\\.([[:digit:]]+)).+",
+         "\\2", .) %>%
+    as.numeric()
+  
+  stats_other = fit %>%
+    glance() %>%
+    dplyr::select(logLik, AIC, BIC) %>% 
+    mutate(logLik = as.numeric(logLik))
+  
+  stats_all = bind_cols(
+    data.frame(c_stats = c_stats),
+    stats_other)
+  
+  return(stats_all)
+}
+
+model_fit_stats = list(fit_logit, fit_nb, fit_random_logit, fit_random_nb) %>% 
+  purrr::map_dfr(get_fit) %>% 
+  mutate(model = c('Logit', 'Negative binomial', 
+                   'Random-effects logit', 'Random-effects negative binomial')) %>% 
+  dplyr::select(model, everything())
+
+print(model_fit_stats)
+```
+
+- C-statistic (`c_stats`): the larger, the better
+- logLik (`logLik`): the larger, the better
+- AIC (`AIC`): the smaller, the better
+- BIC (`BIC`): the smaller, the better
+
+The results show that random-effects models that account for driver-level random effects can substantially improve the model performance. Logistic regression showed slightly better performance compared to negative binomial regression models.
 
 
 Session info
